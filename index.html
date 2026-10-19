@@ -567,6 +567,24 @@ body{
                 <option value="الثالث الثانوي">ثالث ثانوي</option>
             </select>
 
+            <label for="studentSchoolSectionInput" style="display:block;font-size:12px;font-weight:bold;margin-top:9px;margin-bottom:4px;color:#155e75;">الفصل (اختياري)</label>
+            <select
+                id="studentSchoolSectionInput"
+                class="input-box"
+                style="padding:9px;font-size:13px;margin:0;width:100%;"
+                aria-label="اختر الفصل"
+                onchange="saveStudentClass()"
+            >
+                <option value="">اختر الفصل</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="إدارة أعمال">إدارة أعمال</option>
+            </select>
+
             <div id="studentSectionDisplay"
                  style="font-size:12px;color:#155e75;margin-top:6px;">
             </div>
@@ -684,6 +702,7 @@ let currentEmail = "";
 let userRole = "";
 let selectedSection = "";
 let currentClass = "";
+let currentSchoolSection = "";
 
 const DAILY_BASE_LIMIT = 5;
 
@@ -753,6 +772,8 @@ window.addEventListener("DOMContentLoaded",()=>{
 
     const savedClass =
         localStorage.getItem("sabiq_saved_class");
+    const savedSchoolSection = localStorage.getItem("sabiq_saved_school_section");
+    if(savedSchoolSection) currentSchoolSection = savedSchoolSection;
 
     if(savedEmail){
 
@@ -927,11 +948,13 @@ function submitAuthCredentials(){
 
             currentClass =
                 studentData.className || "";
+            currentSchoolSection = studentData.schoolSection || localStorage.getItem("sabiq_saved_school_section") || "";
 
             localStorage.setItem(
                 "sabiq_saved_class",
                 currentClass
             );
+            localStorage.setItem("sabiq_saved_school_section", currentSchoolSection);
 
             document.getElementById(
                 "sectionScreenTitle"
@@ -1081,14 +1104,14 @@ function saveStudentClass(){
 
     const className =
         input.value.trim();
+    const schoolSectionInput = document.getElementById("studentSchoolSectionInput");
+    const schoolSection = schoolSectionInput ? schoolSectionInput.value : "";
 
-    currentClass =
-        className;
+    currentClass = className;
+    currentSchoolSection = schoolSection;
 
-    localStorage.setItem(
-        "sabiq_saved_class",
-        className
-    );
+    localStorage.setItem("sabiq_saved_class", className);
+    localStorage.setItem("sabiq_saved_school_section", schoolSection);
 
     if(!currentEmail)
         return;
@@ -1115,6 +1138,8 @@ function saveStudentClass(){
 
             className:
                 className || "غير محدد",
+
+            schoolSection: schoolSection || "",
 
             updatedAt:Date.now()
 
@@ -1173,6 +1198,8 @@ function saveStudentClass(){
 
                     className:
                         className || "غير محدد",
+
+                    schoolSection: schoolSection || "",
 
                     points:
                         Number(
@@ -1301,6 +1328,8 @@ function getStudentRankData(){
                                 item.className ||
                                 "غير محدد",
 
+                            schoolSection: item.schoolSection || "",
+
                             points:
                                 Number(
                                     item.points || 0
@@ -1324,6 +1353,8 @@ function getStudentRankData(){
                     };
 
                 })
+                // لا يدخل ترتيب المراكز إلا من أجاب عن سؤال واحد على الأقل.
+                .filter(item => Number(item.correct || 0) + Number(item.wrong || 0) > 0)
                 .sort(
                     (a,b)=>b.points-a.points
                 );
@@ -1391,6 +1422,8 @@ function setupRankingsListener(){
                                 item.className ||
                                 "غير محدد",
 
+                            schoolSection: item.schoolSection || "",
+
                             points:
                                 Number(
                                     item.points || 0
@@ -1430,6 +1463,8 @@ function setupRankingsListener(){
                     };
 
                 })
+                // لا تظهر الطالبة في المراكز حتى تجيب عن سؤال واحد على الأقل.
+                .filter(item => Number(item.correct || 0) + Number(item.wrong || 0) > 0)
                 .sort(
                     (a,b)=>b.points-a.points
                 );
@@ -1493,12 +1528,8 @@ function setupRankingsListener(){
 
                         — ${escapeHtml(item.name)}
 
-                        — الفصل:
-                        ${escapeHtml(
-                            item.className ||
-                            "غير محدد"
-                        )}
-
+                        — المرحلة/الصف: ${escapeHtml(item.className || "غير محدد")}
+                        — الفصل: ${escapeHtml(item.schoolSection || "غير محدد")}
                         — ${item.points} نقطة
 
                     </div>
@@ -1580,6 +1611,8 @@ function updateStudentScore(correct){
                 currentClass ||
                 data.className ||
                 "غير محدد",
+
+            schoolSection: currentSchoolSection || data.schoolSection || "",
 
             points:
                 correct
@@ -2725,6 +2758,8 @@ function setupTeacherStudentRankings(){
                             item.className ||
                             "غير محدد",
 
+                        schoolSection: item.schoolSection || "",
+
                         points:
                             Number(
                                 item.points || 0
@@ -2762,6 +2797,7 @@ function setupTeacherStudentRankings(){
                 };
 
             })
+            .filter(student => Number(student.correct || 0) + Number(student.wrong || 0) > 0)
             .sort(
                 (a,b)=>
                 b.points-a.points
@@ -2816,11 +2852,10 @@ function setupTeacherStudentRankings(){
                     </div>
 
                     <div>
-                        🏫 الفصل:
-                        ${escapeHtml(
-                            student.className ||
-                            "غير محدد"
-                        )}
+                        🎓 المرحلة/الصف: ${escapeHtml(student.className || "غير محدد")}
+                    </div>
+                    <div>
+                        🏫 الفصل: ${escapeHtml(student.schoolSection || "غير محدد")}
                     </div>
 
                     <div class="student-stats">
@@ -3103,6 +3138,8 @@ function loadStudentView(){
         "studentClassInput"
     ).value =
         currentClass || "";
+
+    document.getElementById("studentSchoolSectionInput").value = currentSchoolSection || "";
 
     document.getElementById(
         "studentSectionDisplay"
@@ -3488,6 +3525,7 @@ function logout(){
 
     currentClass =
         "";
+    currentSchoolSection = "";
 
     document.getElementById(
         "loginPassInput"
