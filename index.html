@@ -369,7 +369,15 @@ body{
     box-sizing:border-box;
     text-align:right;
     margin-bottom:20px;
+    max-height:340px;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    scrollbar-width:thin;
+    scrollbar-color:#0891b2 #e0f2fe;
 }
+.rankings-box::-webkit-scrollbar,#teacherContributionsList::-webkit-scrollbar,#studentRankDisplay::-webkit-scrollbar{width:8px}
+.rankings-box::-webkit-scrollbar-track,#teacherContributionsList::-webkit-scrollbar-track,#studentRankDisplay::-webkit-scrollbar-track{background:#e0f2fe;border-radius:10px}
+.rankings-box::-webkit-scrollbar-thumb,#teacherContributionsList::-webkit-scrollbar-thumb,#studentRankDisplay::-webkit-scrollbar-thumb{background:#0891b2;border-radius:10px}
 .rankings-title{
     font-weight:bold;
     font-size:16px;
@@ -435,6 +443,13 @@ body{
     margin-top:5px;
     text-align:center;
 }
+
+.recovery-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+.recovery-overlay.open{display:flex}
+.recovery-modal{width:100%;max-width:390px;background:#fcfdf6;border-radius:24px;padding:24px;box-shadow:0 15px 45px rgba(0,0,0,.22);box-sizing:border-box;text-align:right}
+.recovery-modal .input-box{border:1px solid #a5f3fc;margin-top:14px}
+.recovery-actions{display:flex;gap:10px;flex-wrap:wrap}
+.recovery-actions button{flex:1;min-width:110px}
 </style>
 </head>
 
@@ -459,6 +474,7 @@ body{
         <input type="text" id="loginNameInput" class="input-box" placeholder="اسمك">
 
         <button class="action-btn" onclick="submitAuthCredentials()">متابعة</button>
+        <button type="button" class="action-btn" style="background:#a5f3fc;font-size:14px;padding:10px 20px;" onclick="openPasswordRecovery()">استعادة كلمة المرور</button>
     </div>
 </div>
 
@@ -508,6 +524,11 @@ body{
         <span>📐</span>
     </div>
 
+    <div class="section-card" onclick="chooseSection('إدارة أعمال')">
+        تحصيلي إدارة أعمال
+        <span>💼</span>
+    </div>
+
     <span class="back-link" onclick="showScreen('screen-who')">
         الرجوع
     </span>
@@ -533,13 +554,18 @@ body{
                  style="font-size:15px;color:#1f2937;font-weight:bold;margin-bottom:8px;">
             </div>
 
-            <input
+            <select
                 id="studentClassInput"
                 class="input-box"
                 style="padding:9px;font-size:13px;margin:0;width:100%;"
-                placeholder="الفصل"
-                onblur="saveStudentClass()"
+                aria-label="اختر الصف"
+                onchange="saveStudentClass()"
             >
+                <option value="">اختر الصف</option>
+                <option value="الأول الثانوي">أول ثانوي</option>
+                <option value="الثاني الثانوي">ثاني ثانوي</option>
+                <option value="الثالث الثانوي">ثالث ثانوي</option>
+            </select>
 
             <div id="studentSectionDisplay"
                  style="font-size:12px;color:#155e75;margin-top:6px;">
@@ -699,7 +725,12 @@ function getSubTitle(subPath){
         chemistry:"كيمياء",
         physics:"فيزياء",
         math:"رياضيات",
-        biology:"أحياء"
+        biology:"أحياء",
+        arabic:"اللغة العربية",
+        religion:"الدين",
+        socialStudies:"الدراسات الاجتماعية (التاريخ والجغرافيا)",
+        digitalSkills:"المهارات الرقمية",
+        lawPrinciples:"مبادئ القانون"
 
     };
 
@@ -2180,16 +2211,7 @@ function processAndSaveQuestion(
                 question:
                     qText,
 
-                options:[
-                    opt1,
-                    opt2,
-                    opt3,
-                    opt4
-                ].filter(
-                    o=>
-                    o &&
-                    o.trim() !== ""
-                ),
+                options:[opt1,opt2,opt3,opt4],
 
                 correct:
                     correctIndex,
@@ -2371,54 +2393,22 @@ function processAndSaveQuestion(
 }
 
 function updateTeacherPoints(){
-
-    const teacherScoreRef =
-        window.ref(
-            window.db,
-            `teacherScores/${currentEmail}`
-        );
-
-    window.get(
-        teacherScoreRef
-    ).then(snapshot=>{
-
-        let pts = 0;
-
-        if(snapshot.exists()){
-
-            const old =
-                snapshot.val();
-
-            if(
-                old &&
-                typeof old === "object"
-            ){
-
-                pts =
-                    Number(
-                        old.points || 0
-                    );
-
-            }else{
-
-                pts =
-                    Number(old || 0);
-            }
-        }
-
-        window.set(
-            teacherScoreRef,
-            {
-
-                name:
-                    currentName,
-
-                points:
-                    pts + 1
-
-            }
-        );
-
+    // Recalculate from actual questions in this section, so deletes cannot leave stale counts.
+    if(!currentEmail || !selectedSection) return Promise.resolve();
+    const sectionQuestionsRef = window.ref(window.db, `questions/${selectedSection}`);
+    return window.get(sectionQuestionsRef).then(snapshot=>{
+        const data = snapshot.val() || {};
+        let count = 0;
+        Object.values(data).forEach(subjectQuestions=>{
+            if(!subjectQuestions || typeof subjectQuestions !== "object") return;
+            Object.values(subjectQuestions).forEach(question=>{
+                if(question && question.teacherEmail === currentEmail) count++;
+            });
+        });
+        const scoreRef = window.ref(window.db, `teacherSectionScores/${selectedSection}/${currentEmail}`);
+        return window.set(scoreRef, {name: currentName || currentEmail, points: count});
+    }).catch(error=>{
+        console.error("تعذر تحديث مساهمات المعلم:", error);
     });
 }
 
@@ -2523,6 +2513,13 @@ function saveTeacherQuestion(
         ? ytElement.value.trim()
         : "";
 
+    const requiredOptions = [opt1,opt2,opt3,opt4];
+    const missingOptionIndex = requiredOptions.findIndex(value => !String(value || "").trim());
+    if(missingOptionIndex !== -1){
+        alert(`فضلاً عبّئ جميع الخيارات أ، ب، ج، د. الخيار الناقص: ${["أ","ب","ج","د"][missingOptionIndex]}`);
+        return;
+    }
+
     if(!editKey){
 
         checkSimilarQuestions(
@@ -2565,35 +2562,23 @@ function saveTeacherQuestion(
     }
 }
 
-function deleteQuestionFromBank(
-    subPath,
-    qKey
-){
-
-    if(
-        !confirm(
-            "هل أنت متأكد من حذف هذا السؤال من بنك الأسئلة؟"
-        )
-    ){
-        return;
-    }
-
-    const qRef =
-        window.ref(
-            window.db,
-            `questions/${selectedSection}/${subPath}/${qKey}`
-        );
-
-    window.remove(
-        qRef
-    ).then(()=>{
-
-        alert(
-            "تم حذف السؤال بنجاح"
-        );
-
-        loadTeacherView();
-
+function deleteQuestionFromBank(subPath, qKey){
+    if(!confirm("هل أنت متأكد من حذف هذا السؤال من بنك الأسئلة؟")) return;
+    const qRef = window.ref(window.db, `questions/${selectedSection}/${subPath}/${qKey}`);
+    window.get(qRef).then(snapshot=>{
+        const question = snapshot.val();
+        if(!question){ alert("السؤال غير موجود أو سبق حذفه."); return false; }
+        return window.remove(qRef).then(()=>question);
+    }).then(question=>{
+        if(!question) return;
+        // Recompute the teacher's score from the remaining questions in this section.
+        return updateTeacherPoints().then(()=>{
+            alert("تم حذف السؤال وتحديث مساهمات المعلم في هذا القسم.");
+            loadTeacherView();
+        });
+    }).catch(error=>{
+        console.error("Delete question error:", error);
+        alert("تعذر حذف السؤال. تحقق من الاتصال والصلاحيات ثم حاول مجددًا.");
     });
 }
 
@@ -2886,108 +2871,52 @@ function setupTeacherStudentRankings(){
 }
 
 function setupTeacherContributions(){
+    const section = selectedSection;
+    const questionsRef = window.ref(window.db, `questions/${section}`);
+    const scoresRef = window.ref(window.db, `teacherSectionScores/${section}`);
 
-    const teacherScoresRef =
-        window.ref(
-            window.db,
-            "teacherScores"
-        );
-
-    window.onValue(
-        teacherScoresRef,
-        snapshot=>{
-
-        const data =
-            snapshot.val() || {};
-
-        let sortedTeachers =
-            Object.keys(data)
-            .map(email=>{
-
-                const item =
-                    data[email];
-
-                if(
-                    item &&
-                    typeof item === "object"
-                ){
-
-                    return {
-
-                        name:
-                            item.name ||
-                            email,
-
-                        points:
-                            Number(
-                                item.points || 0
-                            )
-
-                    };
-                }
-
-                return {
-
-                    name:email,
-
-                    points:
-                        Number(item || 0)
-
-                };
-
-            })
-            .sort(
-                (a,b)=>
-                b.points-a.points
-            );
-
-        const listContainer =
-            document.getElementById(
-                "teacherContributionsList"
-            );
-
-        if(!listContainer)
-            return;
-
-        if(
-            sortedTeachers.length === 0
-        ){
-
-            listContainer.innerHTML =
-                "<div class='rank-item'>بانتظار مساهمات المعلمين...</div>";
-
-        }else{
-
-            listContainer.innerHTML =
-                "";
-
-            sortedTeachers.forEach(
-                (t,idx)=>{
-
-                listContainer.innerHTML += `
-
-                    <div class="rank-item">
-
-                        ${idx+1}.
-
-                        ${escapeHtml(
-                            t.name
-                        )}
-
-                        :
-
-                        <b>
-                            ${t.points}
-                        </b>
-
-                        سؤال مساهم به
-
-                    </div>
-
-                `;
+    // Rebuild this section's contribution totals from questions actually present in its bank.
+    // This also brings existing questions into the section-specific leaderboard.
+    window.get(questionsRef).then(questionSnapshot=>{
+        const questionTree = questionSnapshot.val() || {};
+        const totals = {};
+        Object.values(questionTree).forEach(subjectQuestions=>{
+            if(!subjectQuestions || typeof subjectQuestions !== "object") return;
+            Object.values(subjectQuestions).forEach(question=>{
+                if(!question || !question.teacherEmail) return;
+                const email = question.teacherEmail;
+                if(!totals[email]) totals[email] = {name:question.teacherName || email, points:0};
+                totals[email].points += 1;
             });
-        }
+        });
+        return window.get(scoresRef).then(scoreSnapshot=>{
+            const existing = scoreSnapshot.val() || {};
+            const writes = [];
+            Object.keys(totals).forEach(email=>{
+                writes.push(window.set(window.ref(window.db, `teacherSectionScores/${section}/${email}`), totals[email]));
+            });
+            Object.keys(existing).forEach(email=>{
+                if(!totals[email]) writes.push(window.remove(window.ref(window.db, `teacherSectionScores/${section}/${email}`)));
+            });
+            return Promise.all(writes);
+        });
+    }).catch(error=>console.error("تعذر إعادة احتساب مساهمات القسم:", error));
 
+    window.onValue(scoresRef, snapshot=>{
+        const data = snapshot.val() || {};
+        const sortedTeachers = Object.keys(data).map(email=>{
+            const item = data[email] || {};
+            return {name:item.name || email, points:Number(item.points || 0)};
+        }).filter(t=>t.points > 0).sort((a,b)=>b.points-a.points);
+        const listContainer = document.getElementById("teacherContributionsList");
+        if(!listContainer) return;
+        if(sortedTeachers.length === 0){
+            listContainer.innerHTML = "<div class='rank-item'>لا توجد مساهمات في هذا القسم حتى الآن.</div>";
+            return;
+        }
+        listContainer.innerHTML = sortedTeachers.map((t,idx)=>
+            `<div class="rank-item">${idx+1}. ${escapeHtml(t.name)} : <b>${t.points}</b> سؤال مساهم به في ${escapeHtml(section)}</div>`
+        ).join("");
     });
 }
 
@@ -3139,6 +3068,22 @@ function setupTeacherOwnQuestionBank(){
     });
 }
 
+function getSubjectsForSection(section){
+    if(section === "إدارة أعمال") return [
+        {id:"arabic",name:"📚 اللغة العربية"},
+        {id:"religion",name:"🕌 الدين"},
+        {id:"socialStudies",name:"🌍 الدراسات الاجتماعية (التاريخ والجغرافيا)"},
+        {id:"digitalSkills",name:"💻 المهارات الرقمية"},
+        {id:"lawPrinciples",name:"⚖️ مبادئ القانون"}
+    ];
+    return [
+        {id:"chemistry",name:"🧪 كيمياء"},
+        {id:"physics",name:"⚡ فيزياء"},
+        {id:"math",name:"📐 رياضيات"},
+        {id:"biology",name:"🧬 أحياء"}
+    ];
+}
+
 function loadStudentView(){
 
     const wrapper =
@@ -3230,29 +3175,7 @@ function loadStudentView(){
 
     }else{
 
-        const subjects = [
-
-            {
-                id:"chemistry",
-                name:"🧪 كيمياء"
-            },
-
-            {
-                id:"physics",
-                name:"⚡ فيزياء"
-            },
-
-            {
-                id:"math",
-                name:"📐 رياضيات"
-            },
-
-            {
-                id:"biology",
-                name:"🧬 أحياء"
-            }
-
-        ];
+        const subjects = getSubjectsForSection(selectedSection);
 
         subjects.forEach(
             sub=>{
@@ -3498,29 +3421,7 @@ function loadTeacherView(){
 
     }else{
 
-        const subjects = [
-
-            {
-                id:"chemistry",
-                name:"🧪 كيمياء"
-            },
-
-            {
-                id:"physics",
-                name:"⚡ فيزياء"
-            },
-
-            {
-                id:"math",
-                name:"📐 رياضيات"
-            },
-
-            {
-                id:"biology",
-                name:"🧬 أحياء"
-            }
-
-        ];
+        const subjects = getSubjectsForSection(selectedSection);
 
         subjects.forEach(
             sub=>{
@@ -3540,6 +3441,31 @@ function loadTeacherView(){
     setupTeacherStudentRankings();
 
     setupTeacherOwnQuestionBank();
+}
+
+function openPasswordRecovery(){
+    const overlay=document.getElementById("passwordRecoveryOverlay");
+    const result=document.getElementById("recoveryResult");
+    if(result) result.textContent="";
+    const emailInput=document.getElementById("recoveryEmailInput");
+    if(emailInput) emailInput.value=(document.getElementById("loginEmailInput")?.value || "").trim();
+    overlay.classList.add("open");
+}
+function closePasswordRecovery(){document.getElementById("passwordRecoveryOverlay").classList.remove("open");}
+function searchRecoveryAccount(){
+    const email=document.getElementById("recoveryEmailInput").value.trim();
+    const result=document.getElementById("recoveryResult");
+    if(!email){result.textContent="فضلاً أدخل البريد الإلكتروني.";return;}
+    const key=email.replace(/[.#$\/\[\]]/g,"_");
+    result.textContent="جاري البحث عن الحساب...";
+    Promise.all([
+        window.get(window.ref(window.db,`users/student/${key}`)),
+        window.get(window.ref(window.db,`users/teacher/${key}`))
+    ]).then(([student,teacher])=>{
+        if(student.exists() || teacher.exists()){
+            result.textContent="تم العثور على الحساب. لا يمكن عرض كلمة المرور الحالية بأمان؛ إذا نسيتها، يلزم إعداد آلية إعادة تعيين آمنة عبر نظام المصادقة المستخدم في المشروع.";
+        }else result.textContent="لم نعثر على حساب بهذا البريد الإلكتروني. تأكد من كتابة البريد المسجل.";
+    }).catch(err=>{console.error(err);result.textContent="تعذر البحث. تحقق من الاتصال والصلاحيات وحاول مجددًا.";});
 }
 
 function logout(){
@@ -3574,6 +3500,20 @@ function logout(){
 }
 
 </script>
+
+
+<div id="passwordRecoveryOverlay" class="recovery-overlay" role="dialog" aria-modal="true" aria-labelledby="recoveryTitle" onclick="if(event.target===this)closePasswordRecovery()">
+  <div class="recovery-modal">
+    <div id="recoveryTitle" class="screen-title" style="margin-bottom:8px">استعادة كلمة المرور</div>
+    <p style="font-size:14px;line-height:1.8;color:#374151;margin:0">أدخل البريد الإلكتروني المسجل للبحث عن الحساب.</p>
+    <input id="recoveryEmailInput" class="input-box" type="email" placeholder="البريد الإلكتروني المسجل" autocomplete="email">
+    <div id="recoveryResult" role="status" style="font-size:14px;line-height:1.8;margin:8px 0 14px;color:#155e75"></div>
+    <div class="recovery-actions">
+      <button type="button" class="action-btn" onclick="searchRecoveryAccount()">بحث</button>
+      <button type="button" class="action-btn" style="background:#e5e7eb" onclick="closePasswordRecovery()">إغلاق</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
