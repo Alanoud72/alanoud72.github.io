@@ -361,6 +361,8 @@ body{
     font-weight:bold;
 }
 .image-upload-row input[type=file]{font-size:13px}
+#teacherContributionsBoard{max-height:none;overflow:visible;overscroll-behavior:auto;scrollbar-width:none;}
+#teacherContributionsBoard::-webkit-scrollbar{display:none;}
 .rankings-box{
     background-color:#a5f3fc;
     width:100%;
@@ -664,7 +666,7 @@ body{
 
     </div>
 
-    <div class="rankings-box">
+    <div class="rankings-box" id="teacherContributionsBoard">
 
         <div class="rankings-title">
             مساهمات المعلمين في بنك الأسئلة 🏆
@@ -2906,52 +2908,61 @@ function setupTeacherStudentRankings(){
 }
 
 function setupTeacherContributions(){
-    const section = selectedSection;
-    const questionsRef = window.ref(window.db, `questions/${section}`);
-    const scoresRef = window.ref(window.db, `teacherSectionScores/${section}`);
+    // Combined, read-only contributions board across all site sections.
+    // It reads the existing question banks and does not modify the database.
+    const sections = ["قدرات", "تحصيلي", "إدارة أعمال"];
+    const listContainer = document.getElementById("teacherContributionsList");
+    if(!listContainer) return;
+    listContainer.innerHTML = "<div class='rank-item'>جاري تحميل المساهمات...</div>";
 
-    // Rebuild this section's contribution totals from questions actually present in its bank.
-    // This also brings existing questions into the section-specific leaderboard.
-    window.get(questionsRef).then(questionSnapshot=>{
-        const questionTree = questionSnapshot.val() || {};
-        const totals = {};
-        Object.values(questionTree).forEach(subjectQuestions=>{
-            if(!subjectQuestions || typeof subjectQuestions !== "object") return;
-            Object.values(subjectQuestions).forEach(question=>{
-                if(!question || !question.teacherEmail) return;
-                const email = question.teacherEmail;
-                if(!totals[email]) totals[email] = {name:question.teacherName || email, points:0};
-                totals[email].points += 1;
+    const sectionData = {};
+    // Wait until every section has returned its first snapshot before rendering.
+    // This prevents a temporary partial board (for example, abilities only)
+    // from flashing before the combined totals appear.
+    const loadedSections = new Set();
+    const renderCombinedBoard = () => {
+        if(loadedSections.size < sections.length) return;
+        const teachers = {};
+        sections.forEach(section=>{
+            const tree = sectionData[section] || {};
+            Object.values(tree).forEach(subjectQuestions=>{
+                if(!subjectQuestions || typeof subjectQuestions !== "object") return;
+                Object.values(subjectQuestions).forEach(question=>{
+                    if(!question || !question.teacherEmail) return;
+                    const email = question.teacherEmail;
+                    if(!teachers[email]) teachers[email] = {name:question.teacherName || email, total:0, bySection:{}};
+                    teachers[email].name = question.teacherName || teachers[email].name;
+                    teachers[email].total += 1;
+                    teachers[email].bySection[section] = (teachers[email].bySection[section] || 0) + 1;
+                });
             });
         });
-        return window.get(scoresRef).then(scoreSnapshot=>{
-            const existing = scoreSnapshot.val() || {};
-            const writes = [];
-            Object.keys(totals).forEach(email=>{
-                writes.push(window.set(window.ref(window.db, `teacherSectionScores/${section}/${email}`), totals[email]));
-            });
-            Object.keys(existing).forEach(email=>{
-                if(!totals[email]) writes.push(window.remove(window.ref(window.db, `teacherSectionScores/${section}/${email}`)));
-            });
-            return Promise.all(writes);
-        });
-    }).catch(error=>console.error("تعذر إعادة احتساب مساهمات القسم:", error));
-
-    window.onValue(scoresRef, snapshot=>{
-        const data = snapshot.val() || {};
-        const sortedTeachers = Object.keys(data).map(email=>{
-            const item = data[email] || {};
-            return {name:item.name || email, points:Number(item.points || 0)};
-        }).filter(t=>t.points > 0).sort((a,b)=>b.points-a.points);
-        const listContainer = document.getElementById("teacherContributionsList");
-        if(!listContainer) return;
-        if(sortedTeachers.length === 0){
-            listContainer.innerHTML = "<div class='rank-item'>لا توجد مساهمات في هذا القسم حتى الآن.</div>";
+        const sorted = Object.values(teachers).sort((a,b)=>b.total-a.total || a.name.localeCompare(b.name, "ar"));
+        if(!sorted.length){
+            listContainer.innerHTML = "<div class='rank-item'>لا توجد مساهمات في بنك الأسئلة حتى الآن.</div>";
             return;
         }
-        listContainer.innerHTML = sortedTeachers.map((t,idx)=>
-            `<div class="rank-item">${idx+1}. ${escapeHtml(t.name)} : <b>${t.points}</b> سؤال مساهم به في ${escapeHtml(section)}</div>`
-        ).join("");
+        listContainer.innerHTML = sorted.map((teacher,index)=>{
+            const breakdown = sections.filter(section=>teacher.bySection[section]).map(section=>
+                `${escapeHtml(section)}: ${teacher.bySection[section]}`
+            ).join(" — ");
+            return `<div class="rank-item">${index+1}. ${escapeHtml(teacher.name)} : <b>${teacher.total}</b> سؤال إجمالي${breakdown ? `<div style="font-size:13px;margin-top:4px;color:#155e75">${breakdown}</div>` : ""}</div>`;
+        }).join("");
+    };
+
+    sections.forEach(section=>{
+        window.onValue(window.ref(window.db, `questions/${section}`), snapshot=>{
+            sectionData[section] = snapshot.val() || {};
+            loadedSections.add(section);
+            renderCombinedBoard();
+        }, error=>{
+            console.error(`تعذر تحميل مساهمات قسم ${section}:`, error);
+            // Mark failed sections as settled so the board can still show the
+            // sections that loaded successfully instead of staying on loading.
+            sectionData[section] = sectionData[section] || {};
+            loadedSections.add(section);
+            renderCombinedBoard();
+        });
     });
 }
 
